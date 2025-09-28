@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invoice & Work Hours → PDF</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0b0c10;--panel:#111318;--muted:#9aa4af;--line:#232630;--brand:#6aa7ff;--ok:#22c55e;--warn:#eab308}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,-apple-system,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:#e5e7eb}
+    .wrap{max-width:1100px;margin:24px auto;padding:24px}
+    h1{font-size:26px;margin:0 0 12px}
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px;margin:16px 0;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .row{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+    label{font-size:12px;color:var(--muted)}
+    input,textarea,select{width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#0f1116;color:#e5e7eb;text-align:left}
+    textarea{min-height:88px;resize:vertical}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:#141824;color:#e5e7eb;padding:10px 14px;border-radius:12px;cursor:pointer}
+    .btn.brand{background:linear-gradient(180deg,#2a7bff,#155bd6);border:0}
+    .btn.ghost{background:#0f1116}
+    .btn:disabled{opacity:.55;cursor:not-allowed}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap}
+    table{width:100%;border-collapse:collapse}
+    th,td{border-bottom:1px dashed var(--line);padding:10px;font-size:14px}
+    th{text-align:left;color:#c7ced6;font-weight:600}
+    td{text-align:left}
+    .right{text-align:right}
+    .muted{color:var(--muted)}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#0f1116;border:1px solid var(--line);font-size:12px;color:#cbd5e1}
+    .grid-2{grid-column:span 2}
+    .grid-3{grid-column:span 3}
+    .grid-4{grid-column:span 4}
+    .grid-6{grid-column:span 6}
+    .grid-12{grid-column:span 12}
+    .section-title{font-size:15px;font-weight:600;margin:12px 0 6px}
+    .totals{max-width:420px;margin-left:auto}
+    .totals .rowline{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--line)}
+    .totals .rowline:last-child{border-bottom:none}
+    @media (max-width:860px){.row{grid-template-columns:repeat(6,1fr)}.grid-6{grid-column:span 6}.grid-4{grid-column:span 6}.grid-3{grid-column:span 3}.grid-2{grid-column:span 3}}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Invoice & Work Hours → PDF <span class="pill">client-side</span></h1>
+    <p class="muted tiny">Enter your details, add regular and overtime rows, then click <b>Generate PDF</b>. A download link will appear.</p>
+
+    <div class="card">
+      <div class="row">
+        <div class="grid-3"><label>Invoice Number</label><input id="invNumber" placeholder="e.g., 007" /></div>
+        <div class="grid-3"><label>Invoice Date (text)</label><input id="invDate" placeholder="e.g., September 15 – 21, 2025" /></div>
+        <div class="grid-3"><label>Tax Label</label><input id="taxLabel" value="HST (13%)" /></div>
+        <div class="grid-3"><label>Tax Rate (%)</label><input id="taxRate" type="number" step="0.01" value="13" /></div>
+        <div class="grid-6"><label>From (Your business)</label><textarea id="fromBlock" placeholder="Business name\nStreet, City, Province\nEmail\nPhone\nHST Number:"></textarea></div>
+        <div class="grid-6"><label>Bill To (Client)</label><textarea id="toBlock" placeholder="Client name\nAddress\nEmail\nPhone"></textarea></div>
+      </div>
+    </div>
+
+    <div class="card" id="regularCard">
+      <div class="section-title">Hours Worked</div>
+      <table id="regularTable">
+        <thead>
+          <tr>
+            <th>Hours</th><th>Rate/hr</th><th>Expenses</th><th>Description</th><th>Subtotal</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="toolbar"><button class="btn" onclick="addRow('regular')">+ Add Row</button><button class="btn ghost" onclick="clearRows('regular')">Clear</button></div>
+    </div>
+
+    <div class="card" id="overtimeCard">
+      <div class="section-title">Overtime Hours</div>
+      <table id="overtimeTable">
+        <thead>
+          <tr>
+            <th>Hours</th><th>Rate/hr</th><th>Subtotal</th><th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="toolbar"><button class="btn" onclick="addRow('overtime')">+ Add Row</button><button class="btn ghost" onclick="clearRows('overtime')">Clear</button></div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="grid-6"><label>Notes (optional)</label><textarea id="notes" placeholder="Payment terms, banking info, thanks, etc."></textarea></div>
+        <div class="grid-6"><div class="totals" id="totalsBox"></div></div>
+      </div>
+      <div class="toolbar" style="margin-top:12px"><button id="genBtn" type="button" class="btn brand">🧾 Generate PDF</button><a id="downloadLink" class="btn" style="display:none" download>⬇️ Download PDF</a></div>
+    </div>
+  </div>
+
+<script>
+const byId = id => document.getElementById(id);
+const money = v => (isFinite(v)? Number(v):0).toFixed(2);
+
+function addRow(kind){
+  const table = byId(kind+"Table").querySelector('tbody');
+  const tr = document.createElement('tr');
+  if(kind === 'regular'){
+    tr.innerHTML = `
+      <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
+      <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
+      <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
+      <td><input placeholder="e.g., One Hill Cres" /></td>
+      <td class="right subtotal">$0.00</td>
+      <td class="right"><button class="btn ghost" onclick="this.closest('tr').remove(); recalc()">✕</button></td>`;
+  } else {
+    tr.innerHTML = `
+      <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
+      <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
+      <td class="right subtotal">$0.00</td>
+      <td class="right"><button class="btn ghost" onclick="this.closest('tr').remove(); recalc()">✕</button></td>`;
+  }
+  table.appendChild(tr); recalc();
+}
+function clearRows(kind){ byId(kind+"Table").querySelector('tbody').innerHTML=''; recalc(); }
+
+function parseTable(kind){
+  return [...byId(kind+"Table").querySelectorAll('tbody tr')].map(r=>{
+    let hours=0, rate=0, exp=0, desc='';
+    const inputs = r.querySelectorAll('input');
+    if(kind==='regular'){ hours=+inputs[0].value||0; rate=+inputs[1].value||0; exp=+inputs[2].value||0; desc=inputs[3].value.trim(); }
+    else { hours=+inputs[0].value||0; rate=+inputs[1].value||0; }
+    const subtotal = hours*rate + exp;
+    const sEl=r.querySelector('.subtotal'); if(sEl) sEl.textContent=`$${money(subtotal)}`;
+    return {desc,hours,rate,expenses:exp,subtotal};
+  });
+}
+
+function recalc(){
+  const regular  = parseTable('regular');
+  const overtime = parseTable('overtime');
+
+  const taxRate = (+byId('taxRate').value || 0) / 100;
+  const sum = a => a.reduce((x,y)=>x+y,0);
+
+  // hours & subtotals (same as before)
+  const regH = sum(regular.map(r=>r.hours));
+  const otH  = sum(overtime.map(r=>r.hours));
+
+  const regSub = sum(regular.map(r=>r.subtotal));
+  const otSub  = sum(overtime.map(r=>r.subtotal));
+
+  const overallHours    = regH + otH;
+  const overallSubtotal = regSub + otSub;
+
+  // NEW: tax base = labor only (no expenses)
+  const regLabor = sum(regular.map(r=>r.hours * r.rate));
+  const otLabor  = sum(overtime.map(r=>r.hours * r.rate));
+  const laborBase = regLabor + otLabor;
+
+  // round tax to cents
+  const tax = Math.round(laborBase * taxRate * 100) / 100;
+  const total = overallSubtotal + tax;
+
+  byId('totalsBox').innerHTML = `
+    <div class='rowline'><span>Regular Subtotal</span><span>$${overallSubtotal ? regSub.toFixed(2) : '0.00'}</span></div>
+    <div class='rowline'><span>Overtime Subtotal</span><span>$${overallSubtotal ? otSub.toFixed(2) : '0.00'}</span></div>
+    <div class='rowline'><span><b>Overall Hours</b></span><span><b>${overallHours.toFixed(2)}</b></span></div>
+    <div class='rowline'><span><b>Overall Subtotal</b></span><span><b>$${overallSubtotal.toFixed(2)}</b></span></div>
+    <div class='rowline'><span>${byId('taxLabel').value}</span><span>$${tax.toFixed(2)}</span></div>
+    <div class='rowline' style='font-size:18px'><span><b>Total Due</b></span><span><b>$${total.toFixed(2)}</b></span></div>
+  `;
+}
+
+
+addEventListener('load', ()=>{addRow('regular');addRow('overtime');recalc();});
+
+async function generatePDF(){
+  if(!window.jspdf || !window.jspdf.jsPDF){ alert('jsPDF failed to load.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  if (typeof doc.autoTable !== 'function'){ alert('jsPDF-AutoTable plugin did not load.'); return; }
+
+  recalc();
+
+  // ===== spacing & sizes =====
+  const margin = 36;
+  const titleSize = 15;         // section title font
+  const gapUnderTitle = 8;      // gap between title and its own table
+  const gapBetweenSections = 26;// gap after a table before the NEXT section title
+  const gapBeforeTotals = 24;   // gap after OT table before "Totals" title
+  const gapAfterTotalsTitle = 10; // gap after thin line under Totals title
+
+  let y = margin;
+  const text = (t,x,y,opts={}) => doc.text(t,x,y,opts);
+
+  // ---- Header
+  doc.setFontSize(24).setFont(undefined,'bold'); text('INVOICE', margin, y);
+  doc.setFontSize(11).setFont(undefined,'normal');
+  text(`Invoice #: ${byId('invNumber').value || ''}`, margin, y + 20);
+  text(`Date: ${byId('invDate').value || ''}`,     margin, y + 36);
+  y += 56;
+
+  doc.setDrawColor(220);
+  doc.line(margin, y, doc.internal.pageSize.getWidth() - margin, y);
+  y += 12;
+
+  // ---- From / Bill To
+  const from = byId('fromBlock').value.trim();
+  const to   = byId('toBlock').value.trim();
+
+  doc.setFont(undefined,'bold'); text('From:', margin, y);
+  doc.setFont(undefined,'normal'); doc.text(from || '', margin, y + 16, { maxWidth: 250 });
+
+  doc.setFont(undefined,'bold'); text('Bill To:', margin + 300, y);
+  doc.setFont(undefined,'normal'); doc.text(to || '', margin + 300, y + 16, { maxWidth: 250 });
+
+  y += 112;
+  doc.line(margin, y, doc.internal.pageSize.getWidth() - margin, y);
+  y += 14;
+
+  // helper: section title with a small gap below it
+  function sectionTitle(t){
+    doc.setFontSize(titleSize).setFont(undefined,'bold');
+    text(t, margin, y);
+    y += gapUnderTitle; // gap before its table
+    doc.setFontSize(11).setFont(undefined,'normal');
+  }
+
+  // ---- Hours Worked
+  sectionTitle('Hours Worked');
+  const regRows = parseTable('regular').map(r => [
+    r.hours.toFixed(2), `$${money(r.rate)}`, `$${money(r.expenses)}`, r.desc || '—', `$${money(r.subtotal)}`
+  ]);
+  if(!regRows.length) regRows.push(['0.00','$0.00','$0.00','—','$0.00']);
+
+  doc.autoTable({
+    head: [["Hours","Rate/hr","Expenses","Description","Subtotal"]],
+    body: regRows,
+    startY: y,
+    styles: { font: 'helvetica', fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [240,240,240], textColor: [0,0,0] },
+    theme: 'grid',
+    margin: { left: margin, right: margin }
+  });
+  // **more space before the next section title**
+  y = doc.lastAutoTable.finalY + gapBetweenSections;
+
+  // ---- Overtime Hours
+  sectionTitle('Overtime Hours');
+  const otRows = parseTable('overtime').map(r => [
+    r.hours.toFixed(2), `$${money(r.rate)}`, `$${money(r.subtotal)}`
+  ]);
+  if(!otRows.length) otRows.push(['0.00','$0.00','$0.00']);
+
+  doc.autoTable({
+    head: [["Hours","Rate/hr","Subtotal"]],
+    body: otRows,
+    startY: y,
+    styles: { fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [240,240,240], textColor: [0,0,0] },
+    theme: 'grid',
+    margin: { left: margin, right: margin }
+  });
+  // **more space before Totals title**
+  y = doc.lastAutoTable.finalY + gapBeforeTotals;
+
+  // ---- Totals
+  doc.setLineWidth(0.3);
+  doc.setFontSize(titleSize).setFont(undefined,'bold');
+  text('Totals', margin, y);
+  y += 6;
+  doc.line(margin, y, doc.internal.pageSize.getWidth() - margin, y);
+  y += gapAfterTotalsTitle;
+
+  const taxLabel = byId('taxLabel').value;
+const taxRate  = (parseFloat(byId('taxRate').value)||0)/100;
+const reg = parseTable('regular');
+const ot  = parseTable('overtime');
+const sum = a => a.reduce((x,y)=>x+y,0);
+
+const regSub = sum(reg.map(r=>r.subtotal));
+const otSub  = sum(ot.map(r=>r.subtotal));
+const overallHours = sum(reg.map(r=>r.hours)) + sum(ot.map(r=>r.hours));
+const overallSub   = regSub + otSub;
+
+// NEW: tax on labor only (no expenses)
+const regLabor = sum(reg.map(r=>r.hours * r.rate));
+const otLabor  = sum(ot.map(r=>r.hours * r.rate));
+const laborBase = regLabor + otLabor;
+
+const tax   = Math.round(laborBase * taxRate * 100) / 100;
+const total = overallSub + tax;
+
+const lines = [
+  ['Regular Subtotal', `$${overallSub ? regSub.toFixed(2) : '0.00'}`],
+  ['Overtime Subtotal', `$${overallSub ? otSub.toFixed(2) : '0.00'}`],
+  ['Overall Hours',    overallHours.toFixed(2)],
+  ['Overall Subtotal', `$${overallSub.toFixed(2)}`],
+  [taxLabel,           `$${tax.toFixed(2)}`],
+  ['Total Due',        `$${total.toFixed(2)}`]
+];
+
+  try {
+  const pageW  = doc.internal.pageSize.getWidth();
+  const innerW = pageW - margin * 2;   // total width between left/right margins
+  const amtCol = 120;                  // width for the Amount column (tweak if needed)
+
+  doc.autoTable({
+    head: [['Label','Amount']],
+    body: lines,
+    startY: y,
+    theme: 'plain',
+    styles: { fontSize: 10, cellPadding: 6 },
+    headStyles: { fillColor: [240,240,240], textColor: [0,0,0] },
+    margin: { left: margin, right: margin },
+    // Make the table exactly fill the inner width.
+    tableWidth: innerW,
+    // Give Label a fixed width of innerW - amtCol so Amount sits flush right.
+    columnStyles: {
+      0: { cellWidth: innerW - amtCol }, // Label column
+      1: { cellWidth: amtCol, halign: 'right' } // Amount column
+    },
+    didParseCell: (data) => {
+      // Ensure header "Amount" text is also right-aligned
+      if (data.section === 'head' && data.column.index === 1) {
+        data.cell.styles.halign = 'right';
+      }
+    }
+  });
+} catch (e) {
+  console.error('AutoTable totals render failed:', e);
+  alert('Totals table failed to render. Check the console for details.');
+}
+
+  const notes = byId('notes').value.trim();
+if(notes){
+  const ny = doc.lastAutoTable.finalY + 20;
+
+  // Make the "Notes:" label small
+  doc.setFontSize(12).setFont(undefined,'bold');
+  doc.text('Notes:', margin, ny);
+
+  // Make the content the same size as "Total Due" row (≈18px)
+  doc.setFontSize(10).setFont(undefined,'normal');
+  doc.text(notes, margin, ny + 20, {
+    maxWidth: doc.internal.pageSize.getWidth() - margin * 2
+  });
+}
+
+
+  const fname = `Invoice_${(byId('invNumber').value || 'draft').replace(/\s+/g,'')}.pdf`;
+  doc.save(fname);
+}
+
+window.addEventListener('DOMContentLoaded',()=>{document.getElementById('genBtn').addEventListener('click',generatePDF)});
+</script>
+</body>
+</html>
