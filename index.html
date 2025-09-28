@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Invoice & Work Hours → PDF</title>
 
+  <!-- Inter font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -30,7 +31,7 @@
     textarea{min-height:140px;resize:vertical}
     input::placeholder,textarea::placeholder{color:#9aa3af}
     input:focus,textarea:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--ring);background:#fff}
-    .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
     .btn{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer;transition:transform .06s,background .15s,border-color .15s}
     .btn:hover{transform:translateY(-1px);background:#f3f4f6;border-color:#d1d5db}
     .btn.brand{background:linear-gradient(180deg,var(--brand),var(--brand-2));border:0;color:#fff;font-weight:600;box-shadow:0 8px 18px rgba(37,99,235,.25)}
@@ -53,7 +54,7 @@
 <body>
   <div class="wrap">
     <h1>Invoice & Work Hours → PDF <span class="pill">client-side</span></h1>
-    <p class="subtle">Enter your details, add regular and overtime rows, then click <b>Generate PDF</b>.</p>
+    <p class="subtle">Enter your details, add regular and overtime rows, then click <b>Generate PDF</b> or <b>Download PDF</b>.</p>
 
     <!-- Top form -->
     <div class="card">
@@ -64,10 +65,10 @@
         <div class="grid-3"><label>Tax Rate (%)</label><input id="taxRate" type="number" step="0.01" value="13" /></div>
 
         <div class="grid-6"><label>From (Your business)</label>
-          <textarea id="fromBlock" placeholder="Business name&#10;Street, City, Province&#10;Email&#10;Phone&#10;HST Number:"></textarea>
+          <textarea id="fromBlock" placeholder="Business name:&#10;Street, City, Province:&#10;Email:&#10;Phone:&#10;HST Number:"></textarea>
         </div>
         <div class="grid-6"><label>Bill To (Client)</label>
-          <textarea id="toBlock" placeholder="Client name&#10;Address&#10;Email&#10;Phone"></textarea>
+          <textarea id="toBlock" placeholder="Client name:&#10;Address:&#10;Email:&#10;Phone:"></textarea>
         </div>
       </div>
     </div>
@@ -115,14 +116,18 @@
         </div>
         <div class="grid-6"><div class="totals" id="totalsBox"></div></div>
       </div>
-      <div class="toolbar" style="margin-top:12px">
+
+      <div class="toolbar">
         <button id="genBtn" type="button" class="btn brand">🧾 Generate PDF</button>
-        <a id="downloadLink" class="btn" style="display:none" download>⬇️ Download PDF</a>
+        <button id="downloadBtn" type="button" class="btn">⬇️ Download PDF</button>
+        <!-- this link will be filled after Generate for quick re-open if needed -->
+        <a id="openLink" class="btn" style="display:none" target="_blank">Open PDF</a>
       </div>
     </div>
   </div>
 
   <script>
+    // ---------- helpers ----------
     const byId = id => document.getElementById(id);
     const money = v => (isFinite(v)? Number(v):0).toFixed(2);
 
@@ -134,7 +139,7 @@
           <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
           <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
           <td class="right"><input type="number" step="0.01" value="0" oninput="recalc()" /></td>
-          <td><input placeholder="e.g., One Hill Cres" /></td>
+          <td><input placeholder="e.g., One Hill Cres" oninput="recalc()" /></td>
           <td class="right subtotal">$0.00</td>
           <td class="right"><button class="btn" onclick="this.closest('tr').remove(); recalc()">✕</button></td>`;
       } else {
@@ -152,11 +157,11 @@
       return [...byId(kind+"Table").querySelectorAll('tbody tr')].map(r=>{
         let hours=0, rate=0, exp=0, desc='';
         const inputs = r.querySelectorAll('input');
-        if(kind==='regular'){ hours=+inputs[0].value||0; rate=+inputs[1].value||0; exp=+inputs[2].value||0; desc=inputs[3].value.trim(); }
+        if(kind==='regular'){ hours=+inputs[0].value||0; rate=+inputs[1].value||0; exp=+inputs[2].value||0; desc=r.querySelector('td:nth-child(4) input')?.value?.trim()||''; }
         else { hours=+inputs[0].value||0; rate=+inputs[1].value||0; }
-        const subtotal = hours*rate + exp;
+        const subtotal = hours*rate + (kind==='regular'?exp:0);
         const sEl=r.querySelector('.subtotal'); if(sEl) sEl.textContent=`$${money(subtotal)}`;
-        return {desc,hours,rate,expenses:exp,subtotal};
+        return {desc,hours,rate,expenses:(kind==='regular'?exp:0),subtotal};
       });
     }
 
@@ -170,7 +175,6 @@
       const otH  = sum(overtime.map(r=>r.hours));
       const regSub = sum(regular.map(r=>r.subtotal));
       const otSub  = sum(overtime.map(r=>r.subtotal));
-
       const overallHours    = regH + otH;
       const overallSubtotal = regSub + otSub;
 
@@ -192,13 +196,15 @@
       `;
     }
 
-      // PDF Generation
-    async function generatePDF(){
-      if(!window.jspdf || !window.jspdf.jsPDF){ alert('jsPDF failed to load.'); return; }
+    // ---------- PDF builder (returns a fresh jsPDF each call) ----------
+    function buildPdf(){
+      if(!window.jspdf || !window.jspdf.jsPDF) { throw new Error('jsPDF not loaded'); }
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ unit:'pt', format:'a4' });
-      if (typeof doc.autoTable !== 'function'){ alert('jsPDF-AutoTable plugin did not load.'); return; }
 
+      if(typeof doc.autoTable !== 'function') { throw new Error('AutoTable not loaded'); }
+
+      // Always recalc from current DOM values before reading
       recalc();
 
       const margin = 36, titleSize = 15, gapUnderTitle = 8, gapBetweenSections = 26, gapBeforeTotals = 24, gapAfterTotalsTitle = 10;
@@ -217,82 +223,88 @@
       const from = byId('fromBlock').value.trim();
       const to   = byId('toBlock').value.trim();
       doc.setFont(undefined,'bold'); text('From:', margin, y);
-      doc.setFont(undefined,'normal'); doc.text(from || '', margin, y + 16, { maxWidth: 250 });
+      doc.setFont(undefined,'normal'); doc.text(from || '', margin, y + 16, { maxWidth: 250, align: 'left' });
       doc.setFont(undefined,'bold'); text('Bill To:', margin + 300, y);
-      doc.setFont(undefined,'normal'); doc.text(to || '', margin + 300, y + 16, { maxWidth: 250 });
+      doc.setFont(undefined,'normal'); doc.text(to || '', margin + 300, y + 16, { maxWidth: 250, align: 'left' });
       y += 112; doc.line(margin, y, doc.internal.pageSize.getWidth() - margin, y); y += 14;
 
       const sectionTitle = t => { doc.setFontSize(titleSize).setFont(undefined,'bold'); text(t, margin, y); y += gapUnderTitle; doc.setFontSize(11).setFont(undefined,'normal'); };
 
       // Hours Worked
       sectionTitle('Hours Worked');
-      const regRows = parseTable('regular').map(r => [ r.hours.toFixed(2), `$${money(r.rate)}`, `$${money(r.expenses)}`, r.desc || '—', `$${money(r.subtotal)}` ]);
+      const reg = parseTable('regular');
+      const regRows = reg.map(r => [ r.hours.toFixed(2), `$${money(r.rate)}`, `$${money(r.expenses)}`, r.desc || '—', `$${money(r.subtotal)}` ]);
       if(!regRows.length) regRows.push(['0.00','$0.00','$0.00','—','$0.00']);
-      doc.autoTable({ head:[["Hours","Rate/hr","Expenses","Description","Subtotal"]], body:regRows, startY:y, styles:{font:'helvetica', fontSize:10, cellPadding:6}, headStyles:{fillColor:[240,240,240], textColor:[0,0,0]}, theme:'grid', margin:{left:margin,right:margin} });
+      doc.autoTable({
+        head:[["Hours","Rate/hr","Expenses","Description","Subtotal"]],
+        body:regRows,
+        startY:y,
+        styles:{font:'helvetica', fontSize:10, cellPadding:6},
+        headStyles:{fillColor:[240,240,240], textColor:[0,0,0]},
+        theme:'grid',
+        margin:{left:margin,right:margin}
+      });
       y = doc.lastAutoTable.finalY + gapBetweenSections;
 
       // Overtime Hours
       sectionTitle('Overtime Hours');
-      const otRows = parseTable('overtime').map(r => [ r.hours.toFixed(2), `$${money(r.rate)}`, `$${money(r.subtotal)}` ]);
+      const ot = parseTable('overtime');
+      const otRows = ot.map(r => [ r.hours.toFixed(2), `$${money(r.rate)}`, `$${money(r.subtotal)}` ]);
       if(!otRows.length) otRows.push(['0.00','$0.00','$0.00']);
-      doc.autoTable({ head:[["Hours","Rate/hr","Subtotal"]], body:otRows, startY:y, styles:{fontSize:10, cellPadding:6}, headStyles:{fillColor:[240,240,240], textColor:[0,0,0]}, theme:'grid', margin:{left:margin,right:margin} });
+      doc.autoTable({
+        head:[["Hours","Rate/hr","Subtotal"]],
+        body:otRows,
+        startY:y,
+        styles:{fontSize:10, cellPadding:6},
+        headStyles:{fillColor:[240,240,240], textColor:[0,0,0]},
+        theme:'grid',
+        margin:{left:margin,right:margin}
+      });
       y = doc.lastAutoTable.finalY + gapBeforeTotals;
 
-      // Totals
-      doc.setLineWidth(0.3); doc.setFontSize(titleSize).setFont(undefined,'bold'); text('Totals', margin, y); y += 6;
-      doc.line(margin, y, doc.internal.pageSize.getWidth() - margin, y); y += gapAfterTotalsTitle;
-
-      const taxLabel = byId('taxLabel').value;
-      const taxRate  = (parseFloat(byId('taxRate').value)||0)/100;
-      const reg = parseTable('regular'); const ot = parseTable('overtime');
+      // Totals data
       const sum = a => a.reduce((x,y)=>x+y,0);
-      const regSub = sum(reg.map(r=>r.subtotal)), otSub = sum(ot.map(r=>r.subtotal));
+      const taxLabel = byId('taxLabel').value;
+      const taxRate  = (+byId('taxRate').value||0)/100;
+      const regSub = sum(reg.map(r=>r.subtotal));
+      const otSub  = sum(ot.map(r=>r.subtotal));
       const overallHours = sum(reg.map(r=>r.hours)) + sum(ot.map(r=>r.hours));
       const overallSub   = regSub + otSub;
-      const regLabor = sum(reg.map(r=>r.hours * r.rate)), otLabor = sum(ot.map(r=>r.hours * r.rate));
+      const regLabor = sum(reg.map(r=>r.hours * r.rate));
+      const otLabor  = sum(ot.map(r=>r.hours * r.rate));
       const tax   = Math.round((regLabor + otLabor) * taxRate * 100) / 100;
       const total = overallSub + tax;
 
-      const lines = [
-        ['Regular Subtotal:', `$${overallSub ? regSub.toFixed(2) : '0.00'}`],
-        ['Overtime Subtotal:', `$${overallSub ? otSub.toFixed(2) : '0.00'}`],
-        ['Overall Hours:',    overallHours.toFixed(2)],
-        ['Overall Subtotal:', `$${overallSub.toFixed(2)}`],
-        [taxLabel,           `$${tax.toFixed(2)}`],
-        ['Total Due:',        `$${total.toFixed(2)}`]
-      ];
+      // Totals title + line
+      doc.setLineWidth(0.3); doc.setFontSize(titleSize).setFont(undefined,'bold'); text('Totals', margin, y); y += 6;
+      doc.line(margin, y, doc.internal.pageSize.getWidth() - margin, y); y += gapAfterTotalsTitle;
 
+      // Totals table
       const pageW  = doc.internal.pageSize.getWidth();
       const innerW = pageW - margin * 2;
       const amtCol = 120;
-
       doc.autoTable({
-  head: [['Label','Amount']],
-  body: [
-    ['Regular Subtotal:', `$${overallSub ? regSub.toFixed(2) : '0.00'}`],
-    ['Overtime Subtotal:', `$${overallSub ? otSub.toFixed(2) : '0.00'}`],
-    ['Overall Hours:',    overallHours.toFixed(2)],
-    ['Overall Subtotal:', `$${overallSub.toFixed(2)}`],
-    [taxLabel,           `$${tax.toFixed(2)}`],
-    ['Total Due:',        `$${total.toFixed(2)}`]
-  ],
-  startY: y,
-  theme: 'plain',
-  styles: { fontSize: 10, cellPadding: 6 },
-  headStyles: { fillColor: [240,240,240], textColor: [0,0,0] },
-  margin: { left: margin, right: margin },
-  tableWidth: innerW,
-  columnStyles: {
-    0: { cellWidth: innerW - amtCol, fontStyle: 'bold' }, // ← BOLD LABELS
-    1: { cellWidth: amtCol, halign: 'right' }
-  },
-  didParseCell: d => {
-    if(d.section === 'head' && d.column.index === 1){
-      d.cell.styles.halign = 'right';
-    }
-  }
-});
-
+        head: [['Label','Amount']],
+        body: [
+          ['Regular Subtotal:', `$${overallSub ? regSub.toFixed(2) : '0.00'}`],
+          ['Overtime Subtotal:', `$${overallSub ? otSub.toFixed(2) : '0.00'}`],
+          ['Overall Hours:',    overallHours.toFixed(2)],
+          ['Overall Subtotal:', `$${overallSub.toFixed(2)}`],
+          [taxLabel,            `$${tax.toFixed(2)}`],
+          ['Total Due:',        `$${total.toFixed(2)}`]
+        ],
+        startY: y,
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 6 },
+        headStyles: { fillColor: [240,240,240], textColor: [0,0,0] },
+        margin: { left: margin, right: margin },
+        tableWidth: innerW,
+        columnStyles: {
+          0: { cellWidth: innerW - amtCol, fontStyle: 'bold' }, // bold labels
+          1: { cellWidth: amtCol, halign: 'right' }
+        },
+        didParseCell: d => { if(d.section === 'head' && d.column.index === 1){ d.cell.styles.halign = 'right'; } }
+      });
 
       // Notes
       const notes = byId('notes').value.trim();
@@ -304,12 +316,44 @@
       }
 
       const fname = `Invoice_${(byId('invNumber').value || 'draft').replace(/\s+/g,'')}.pdf`;
-      doc.save(fname);
+      return { doc, fname };
     }
-    // wire it up
-    window.addEventListener('DOMContentLoaded',()=>{
+
+    // ---------- Buttons wiring ----------
+    window.addEventListener('DOMContentLoaded', () => {
       addRow('regular'); addRow('overtime'); recalc();
-      document.getElementById('genBtn').addEventListener('click', generatePDF);
+
+      byId('genBtn').addEventListener('click', () => {
+        try{
+          const { doc, fname } = buildPdf();
+          const blob = doc.output('blob');
+          const url = URL.createObjectURL(blob);
+
+          // open in new tab
+          window.open(url, '_blank');
+
+          // provide an "Open PDF" link for users who blocked popups
+          const openLink = byId('openLink');
+          openLink.href = url;
+          openLink.style.display = 'inline-flex';
+          openLink.textContent = 'Open PDF';
+          openLink.download = fname; // optional: lets them long-press to save
+        }catch(e){
+          alert(e.message || 'Failed to generate PDF.');
+          console.error(e);
+        }
+      });
+
+      // Download: save directly
+      byId('downloadBtn').addEventListener('click', () => {
+        try{
+          const { doc, fname } = buildPdf();
+          doc.save(fname);
+        }catch(e){
+          alert(e.message || 'Failed to download PDF.');
+          console.error(e);
+        }
+      });
     });
   </script>
 </body>
